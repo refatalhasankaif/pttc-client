@@ -87,8 +87,10 @@ class AudioProcessor extends AudioWorkletProcessor {
     flush() {
         // Convert to Int16
         const int16Buffer = new Int16Array(this.bufferSize);
+        let sumSq = 0;
         for (let i = 0; i < this.bufferSize; i++) {
             const s = Math.max(-1, Math.min(1, this._buffer[i]));
+            sumSq += s * s;
             int16Buffer[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
         }
 

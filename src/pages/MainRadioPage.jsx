@@ -344,8 +344,8 @@ export default function MainRadioPage() {
                   <div
                     key={u.uid}
                     className={`border-l-2 lg:border-l-4 p-2 sm:p-3 transition-all ${speakingUsers.has(u.callsign)
-                        ? 'bg-military-700 border-military-accent shadow-lg'
-                        : 'bg-military-700 border-military-600'
+                      ? 'bg-military-700 border-military-accent shadow-lg'
+                      : 'bg-military-700 border-military-600'
                       }`}
                   >
                     <div className="flex items-center justify-between">
@@ -390,10 +390,10 @@ export default function MainRadioPage() {
                   <div
                     key={msg.id}
                     className={`px-2 sm:px-3 py-1 sm:py-2 border-l-2 lg:border-l-4 ${msg.type === 'talking'
-                        ? 'bg-military-700 border-military-accent text-military-accent'
-                        : msg.type === 'error'
-                          ? 'bg-military-700 border-military-danger text-military-danger'
-                          : 'bg-military-700 border-military-400 text-military-400'
+                      ? 'bg-military-700 border-military-accent text-military-accent'
+                      : msg.type === 'error'
+                        ? 'bg-military-700 border-military-danger text-military-danger'
+                        : 'bg-military-700 border-military-400 text-military-400'
                       }`}
                   >
                     <span className="hidden sm:inline">[{msg.timestamp.toLocaleTimeString()}]</span> {msg.text}
@@ -419,19 +419,26 @@ export default function MainRadioPage() {
             {/* PTT Button */}
             <div className="flex flex-col items-center gap-4 sm:gap-6">
               <button
+                disabled={speakingUsers.size > 0 && !isTalking}
                 onMouseDown={handlePTTMouseDown}
                 onMouseUp={handlePTTMouseUp}
                 onMouseLeave={handlePTTMouseUp}
                 onTouchStart={handlePTTTouchStart}
                 onTouchEnd={handlePTTTouchEnd}
-                className={`w-32 h-32 sm:w-40 sm:h-40 lg:w-48 lg:h-48 rounded-full flex items-center justify-center transition-all duration-200 border-4 lg:border-8 select-none ${isTalking
+                className={`w-32 h-32 sm:w-40 sm:h-40 lg:w-48 lg:h-48 rounded-full flex items-center justify-center transition-all duration-200 border-4 lg:border-8 select-none ${speakingUsers.size > 0 && !isTalking
+                  ? 'bg-gray-700 bg-opacity-30 border-gray-600 cursor-not-allowed opacity-50'
+                  : isTalking
                     ? 'bg-military-danger bg-opacity-30 border-military-danger animate-pulse active:scale-95'
                     : 'bg-military-accent bg-opacity-20 border-military-accent active:scale-95 hover:bg-opacity-30'
                   }`}
-                style={isTalking ? { boxShadow: '0 0 30px rgba(231, 76, 60, 0.6)' } : { boxShadow: '0 0 30px rgba(46, 204, 113, 0.4)' }}
+                style={isTalking ? { boxShadow: '0 0 30px rgba(231, 76, 60, 0.6)' } :
+                  speakingUsers.size > 0 && !isTalking ? { boxShadow: 'none' } :
+                    { boxShadow: '0 0 30px rgba(46, 204, 113, 0.4)' }}
               >
                 {isTalking ? (
                   <AudioWaves />
+                ) : speakingUsers.size > 0 ? (
+                  <LogOut className="w-12 h-12 sm:w-16 sm:h-16 lg:w-20 lg:h-20 text-gray-500 rotate-180" /> // Using Icon to show receiving or blocked
                 ) : (
                   <Mic2 className="w-12 h-12 sm:w-16 sm:h-16 lg:w-20 lg:h-20 text-military-accent" />
                 )}
@@ -441,7 +448,7 @@ export default function MainRadioPage() {
             {/* Status Text */}
             <div>
               <p className="text-military-accent font-black text-lg sm:text-xl lg:text-2xl uppercase tracking-wider">
-                {isTalking ? '▰ TRANSMITTING ▰' : '◇ READY ◇'}
+                {isTalking ? '▰ TRANSMITTING ▰' : speakingUsers.size > 0 ? '▰ RECEIVING ▰' : '◇ READY ◇'}
               </p>
               <p className="text-military-400 text-xs font-mono uppercase tracking-widest mt-2">
                 {isTalking ? 'RELEASE TO STOP' : (
@@ -475,7 +482,7 @@ export default function MainRadioPage() {
       {/* Footer */}
       <div className="bg-military-900 border-t-2 lg:border-t-4 border-military-accent px-3 sm:px-4 lg:px-6 py-2 sm:py-3 text-center text-military-accent text-xs font-mono uppercase tracking-widest"
         style={{ boxShadow: '0 -4px 15px rgba(46, 204, 113, 0.2)' }}>
-        <span className="hidden sm:inline">▰▰▰ SINGLE CHANNEL • MAX 2 SPEAKERS • ENCRYPTED TRANSMISSION ▰▰▰</span>
+        <span className="hidden sm:inline">▰▰▰ SINGLE CHANNEL • MAX 1 SPEAKER • ENCRYPTED TRANSMISSION ▰▰▰</span>
         <span className="sm:hidden">▰ ENCRYPTED ▰</span>
       </div>
     </div>
