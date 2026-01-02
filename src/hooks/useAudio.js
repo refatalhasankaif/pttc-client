@@ -57,6 +57,10 @@ export function useAudio(socket) {
                     rawBuffer = rawBuffer.slice(0, rawBuffer.byteLength - 1);
                 }
                 const int16Data = new Int16Array(rawBuffer);
+                if (int16Data.length === 0) {
+                    // console.warn('[Audio] Buffer empty after processing. Skipping.');
+                    return;
+                }
                 const float32Data = pcmToFloat32(int16Data);
 
                 const buffer = context.createBuffer(1, float32Data.length, TARGET_SAMPLE_RATE);
