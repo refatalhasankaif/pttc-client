@@ -5,7 +5,7 @@ export function useAudio(socket) {
     const audioContextRef = useRef(null);
     const nextStartTimeRef = useRef(0);
     const pendingAudioRef = useRef(new Uint8Array(0));
-    const workletNodeRef = useRef(null);
+    const processorRef = useRef(null); // Changed from workletNodeRef
     const streamRef = useRef(null);
     const sourceRef = useRef(null);
 
@@ -16,8 +16,8 @@ export function useAudio(socket) {
     // Initialize Audio Context
     useEffect(() => {
         const AudioContext = window.AudioContext || window.webkitAudioContext;
+        // latencyHint interaction is fine, but ScriptProcessor adds its own latency
         audioContextRef.current = new AudioContext({
-            // Explicitly requesting low latency if supported
             latencyHint: 'interactive',
         });
 
@@ -28,7 +28,45 @@ export function useAudio(socket) {
         };
     }, []);
 
-    // Helper: Convert Int16 (transport) to Float32 (audio engine)
+    // --- Helper Functions for ScriptProcessor (Legacy Mode) ---
+
+    // Downsample from Context Sample Rate (e.g. 44.1k/48k) to Target (16k)
+    const downsampleBuffer = (buffer, sampleRate, outSampleRate) => {
+        if (outSampleRate === sampleRate) {
+            return buffer;
+        }
+        if (outSampleRate > sampleRate) {
+            return buffer;
+        }
+        const sampleRateRatio = sampleRate / outSampleRate;
+        const newLength = Math.round(buffer.length / sampleRateRatio);
+        const result = new Float32Array(newLength);
+        let offsetResult = 0;
+        let offsetBuffer = 0;
+        while (offsetResult < result.length) {
+            const nextOffsetBuffer = Math.round((offsetResult + 1) * sampleRateRatio);
+            let accum = 0, count = 0;
+            for (let i = offsetBuffer; i < nextOffsetBuffer && i < buffer.length; i++) {
+                accum += buffer[i];
+                count++;
+            }
+            result[offsetResult] = accum / count;
+            offsetResult++;
+            offsetBuffer = nextOffsetBuffer;
+        }
+        return result;
+    };
+
+    const floatTo16BitPCM = (input) => {
+        const output = new Int16Array(input.length);
+        for (let i = 0; i < input.length; i++) {
+            const s = Math.max(-1, Math.min(1, input[i]));
+            output[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+        }
+        return output;
+    };
+
+    // Helper: Convert Int16 (transport) to Float32 (audio engine) - Used in Playback
     const pcmToFloat32 = (input) => {
         const output = new Float32Array(input.length);
         for (let i = 0; i < input.length; i++) {
@@ -37,6 +75,8 @@ export function useAudio(socket) {
         }
         return output;
     };
+
+    // --- End Helpers ---
 
     // Handle incoming voice data
     useEffect(() => {
@@ -115,21 +155,11 @@ export function useAudio(socket) {
                 await context.resume();
             }
 
-            // Load the worklet module if not already loaded
-            try {
-                await context.audioWorklet.addModule('/audio-processor.js');
-                console.log('AudioWorklet module loaded successfully');
-            } catch (e) {
-                console.error("Failed to load AudioWorklet module:", e);
-            }
-
             const stream = await navigator.mediaDevices.getUserMedia({
                 audio: {
                     echoCancellation: true,
                     noiseSuppression: true,
                     autoGainControl: true,
-                    // Request native sample rate to avoid internal resampling overhead if possible,
-                    // though browser usually handles this.
                 }
             });
             streamRef.current = stream;
@@ -137,23 +167,25 @@ export function useAudio(socket) {
             const source = context.createMediaStreamSource(stream);
             sourceRef.current = source;
 
-            // Create AudioWorkletNode
-            const workletNode = new AudioWorkletNode(context, 'audio-processor');
-            workletNodeRef.current = workletNode;
+            // ScriptProcessorNode (Legacy)
+            // Buffer size 4096 = ~93ms latency at 44.1kHz, but safer for main thread
+            const processor = context.createScriptProcessor(4096, 1, 1);
+            processorRef.current = processor;
 
-            workletNode.port.onmessage = (event) => {
+            processor.onaudioprocess = (e) => {
                 if (!socket) return;
-                // console.log('[useAudio] Received data from worklet, emitting to socket'); // Spammy
-                // event.data.audio is an ArrayBuffer (Int16)
-                socket.emit('voice', { audio: event.data.audio });
+
+                const inputData = e.inputBuffer.getChannelData(0);
+                // Downsample to 16kHz
+                const downsampled = downsampleBuffer(inputData, context.sampleRate, TARGET_SAMPLE_RATE);
+                // Convert to Int16
+                const pcm16 = floatTo16BitPCM(downsampled);
+
+                socket.emit('voice', { audio: pcm16.buffer });
             };
 
-            workletNode.onprocessorerror = (err) => {
-                console.error('AudioWorklet processor error:', err);
-            };
-
-            source.connect(workletNode);
-            workletNode.connect(context.destination); // Connect to destination to keep it alive, even if it outputs nothing
+            source.connect(processor);
+            processor.connect(context.destination); // Needed for Chrome to fire events
 
             setIsRecording(true);
 
@@ -163,10 +195,10 @@ export function useAudio(socket) {
     }, [socket]);
 
     const stopRecording = useCallback(() => {
-        if (workletNodeRef.current) {
-            workletNodeRef.current.disconnect();
-            workletNodeRef.current.port.onmessage = null;
-            workletNodeRef.current = null;
+        if (processorRef.current) {
+            processorRef.current.disconnect();
+            processorRef.current.onaudioprocess = null;
+            processorRef.current = null;
         }
         if (sourceRef.current) {
             sourceRef.current.disconnect();
