@@ -4,6 +4,7 @@ export function useAudio(socket) {
     const [isRecording, setIsRecording] = useState(false);
     const audioContextRef = useRef(null);
     const nextStartTimeRef = useRef(0);
+    const pendingAudioRef = useRef(new Uint8Array(0));
     const workletNodeRef = useRef(null);
     const streamRef = useRef(null);
     const sourceRef = useRef(null);
@@ -50,17 +51,34 @@ export function useAudio(socket) {
                     await context.resume();
                 }
 
-                // data.audio is Int16 PCM. Handle potential alignment issues (odd byte length).
-                let rawBuffer = data.audio;
-                if (rawBuffer.byteLength % 2 !== 0) {
-                    console.warn(`[Audio] Received odd byte length: ${rawBuffer.byteLength}. Trimming 1 byte.`);
-                    rawBuffer = rawBuffer.slice(0, rawBuffer.byteLength - 1);
+                // packet reassembly: handle fragmentation (odd bytes)
+                let incoming = new Uint8Array(data.audio);
+                let pending = pendingAudioRef.current;
+                let combined;
+
+                if (pending.length > 0) {
+                    combined = new Uint8Array(pending.length + incoming.length);
+                    combined.set(pending);
+                    combined.set(incoming, pending.length);
+                } else {
+                    combined = incoming;
                 }
-                const int16Data = new Int16Array(rawBuffer);
-                if (int16Data.length === 0) {
-                    // console.warn('[Audio] Buffer empty after processing. Skipping.');
-                    return;
+
+                const remainder = combined.length % 2;
+                let processBuffer = combined;
+
+                if (remainder !== 0) {
+                    // Save the last byte for next time
+                    pendingAudioRef.current = combined.slice(combined.length - 1);
+                    processBuffer = combined.slice(0, combined.length - 1);
+                } else {
+                    pendingAudioRef.current = new Uint8Array(0);
                 }
+
+                if (processBuffer.length === 0) return;
+
+                // Safe to view as Int16
+                const int16Data = new Int16Array(processBuffer.buffer, processBuffer.byteOffset, processBuffer.byteLength / 2);
                 const float32Data = pcmToFloat32(int16Data);
 
                 const buffer = context.createBuffer(1, float32Data.length, TARGET_SAMPLE_RATE);
