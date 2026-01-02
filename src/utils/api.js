@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { auth } from '../firebase';
 
-const API_URL = 'http://localhost:4000';
+const API_URL = 'https://pttc-backend.onrender.com/';
 
 export const api = axios.create({
   baseURL: API_URL,
