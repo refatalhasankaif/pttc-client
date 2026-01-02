@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../hooks/useSocket';
+import { useAudio } from '../hooks/useAudio';
 import api from '../utils/api';
 import { Mic2, LogOut, Users, MessageCircle, Radio } from 'lucide-react';
 
@@ -27,6 +28,7 @@ export default function MainRadioPage() {
   useAuth();
   const navigate = useNavigate();
   const { socket, connected } = useSocket();
+  const { startRecording, stopRecording: stopAudioRecording } = useAudio(socket);
   const [profile, setProfile] = useState(null);
   const [onlineUsers, setOnlineUsers] = useState([]);
   const [systemMessages, setSystemMessages] = useState([]);
@@ -58,15 +60,17 @@ export default function MainRadioPage() {
     if (!isTalking && socket && connected && permissionsGranted) {
       setIsTalking(true);
       socket.emit('request-talk');
+      startRecording();
     }
-  }, [isTalking, socket, connected, permissionsGranted]);
+  }, [isTalking, socket, connected, permissionsGranted, startRecording]);
 
   const stopTalking = useCallback(() => {
     if (isTalking && socket && connected) {
       setIsTalking(false);
       socket.emit('release-talk');
+      stopAudioRecording();
     }
-  }, [isTalking, socket, connected]);
+  }, [isTalking, socket, connected, stopAudioRecording]);
 
   const handlePTTMouseDown = () => {
     pttButtonPressed.current = true;
@@ -94,19 +98,19 @@ export default function MainRadioPage() {
   const requestPermissions = async () => {
     try {
       // Request microphone access
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        audio: true 
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: true
       });
-      
+
       // Stop the stream immediately as we just need permission
       stream.getTracks().forEach(track => track.stop());
-      
+
       setPermissionsGranted(true);
       addSystemMessage('AUDIO PERMISSIONS GRANTED', 'info');
     } catch (error) {
       console.error('Permission error:', error);
-      setPermissionError(error.name === 'NotAllowedError' 
-        ? 'MICROPHONE ACCESS DENIED' 
+      setPermissionError(error.name === 'NotAllowedError'
+        ? 'MICROPHONE ACCESS DENIED'
         : 'MICROPHONE ACCESS ERROR');
     }
   };
@@ -339,11 +343,10 @@ export default function MainRadioPage() {
                 onlineUsers.map((u) => (
                   <div
                     key={u.uid}
-                    className={`border-l-2 lg:border-l-4 p-2 sm:p-3 transition-all ${
-                      speakingUsers.has(u.callsign)
+                    className={`border-l-2 lg:border-l-4 p-2 sm:p-3 transition-all ${speakingUsers.has(u.callsign)
                         ? 'bg-military-700 border-military-accent shadow-lg'
                         : 'bg-military-700 border-military-600'
-                    }`}
+                      }`}
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2 flex-1 min-w-0">
@@ -386,13 +389,12 @@ export default function MainRadioPage() {
                 systemMessages.map((msg) => (
                   <div
                     key={msg.id}
-                    className={`px-2 sm:px-3 py-1 sm:py-2 border-l-2 lg:border-l-4 ${
-                      msg.type === 'talking'
+                    className={`px-2 sm:px-3 py-1 sm:py-2 border-l-2 lg:border-l-4 ${msg.type === 'talking'
                         ? 'bg-military-700 border-military-accent text-military-accent'
                         : msg.type === 'error'
-                        ? 'bg-military-700 border-military-danger text-military-danger'
-                        : 'bg-military-700 border-military-400 text-military-400'
-                    }`}
+                          ? 'bg-military-700 border-military-danger text-military-danger'
+                          : 'bg-military-700 border-military-400 text-military-400'
+                      }`}
                   >
                     <span className="hidden sm:inline">[{msg.timestamp.toLocaleTimeString()}]</span> {msg.text}
                   </div>
@@ -422,11 +424,10 @@ export default function MainRadioPage() {
                 onMouseLeave={handlePTTMouseUp}
                 onTouchStart={handlePTTTouchStart}
                 onTouchEnd={handlePTTTouchEnd}
-                className={`w-32 h-32 sm:w-40 sm:h-40 lg:w-48 lg:h-48 rounded-full flex items-center justify-center transition-all duration-200 border-4 lg:border-8 select-none ${
-                  isTalking
+                className={`w-32 h-32 sm:w-40 sm:h-40 lg:w-48 lg:h-48 rounded-full flex items-center justify-center transition-all duration-200 border-4 lg:border-8 select-none ${isTalking
                     ? 'bg-military-danger bg-opacity-30 border-military-danger animate-pulse active:scale-95'
                     : 'bg-military-accent bg-opacity-20 border-military-accent active:scale-95 hover:bg-opacity-30'
-                }`}
+                  }`}
                 style={isTalking ? { boxShadow: '0 0 30px rgba(231, 76, 60, 0.6)' } : { boxShadow: '0 0 30px rgba(46, 204, 113, 0.4)' }}
               >
                 {isTalking ? (
