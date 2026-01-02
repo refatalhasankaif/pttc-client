@@ -1,0 +1,100 @@
+@import "tailwindcss";
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(135deg, #007910 0%, #001f07 100%);
+}
+
+.wave-bar {
+  display: inline-block;
+  background: currentColor;
+  margin: 0 2px;
+  border-radius: 2px;
+}
+
+.wave-bar-1 { animation: wave1 0.5s ease-in-out infinite; }
+.wave-bar-2 { animation: wave2 0.6s ease-in-out infinite; }
+.wave-bar-3 { animation: wave1 0.7s ease-in-out infinite; }
+.wave-bar-4 { animation: wave2 0.5s ease-in-out infinite 0.1s; }
+.wave-bar-5 { animation: wave1 0.6s ease-in-out infinite 0.1s; }
+
+.glow-border {
+  position: relative;
+  border: 2px solid #2ecc71;
+  box-shadow: 0 0 10px rgba(46, 204, 113, 0.5), inset 0 0 10px rgba(46, 204, 113, 0.1);
+}
+
+.scan-line {
+  animation: scan 1.5s ease-in-out infinite;
+}
+
+@keyframes wave1 {
+  0%, 100% { height: 0.5em; }
+  50% { height: 1em; }
+}
+
+@keyframes wave2 {
+  0%, 100% { height: 0.3em; }
+  50% { height: 0.8em; }
+}
+
+@keyframes scan {
+  0% { transform: translateY(0); opacity: 0; }
+  50% { opacity: 1; }
+  100% { transform: translateY(20px); opacity: 0; }
+}
+a:hover {
+  color: #535bf2;
+}
+
+body {
+  margin: 0;
+  display: flex;
+  place-items: center;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+h1 {
+  font-size: 3.2em;
+  line-height: 1.1;
+}
+
+button {
+  border-radius: 8px;
+  border: 1px solid transparent;
+  padding: 0.6em 1.2em;
+  font-size: 1em;
+  font-weight: 500;
+  font-family: inherit;
+  background-color: #1a1a1a;
+  cursor: pointer;
+  transition: border-color 0.25s;
+}
+button:hover {
+  border-color: #646cff;
+}
+button:focus,
+button:focus-visible {
+  outline: 4px auto -webkit-focus-ring-color;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    color: #1a461c;
+    background-color: #ffffff;
+  }
+  a:hover {
+    color: #003805;
+  }
+  button {
+    background-color: #f9f9f9;
+  }
+}
