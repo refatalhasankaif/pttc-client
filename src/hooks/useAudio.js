@@ -4,18 +4,21 @@ export function useAudio(socket) {
     const [isRecording, setIsRecording] = useState(false);
     const audioContextRef = useRef(null);
     const nextStartTimeRef = useRef(0);
-    const processorRef = useRef(null);
+    const workletNodeRef = useRef(null);
     const streamRef = useRef(null);
     const sourceRef = useRef(null);
 
-    // Config
+    // Playback settings
     const TARGET_SAMPLE_RATE = 16000;
-    const BUFFER_SIZE = 4096;
+    const JITTER_BUFFER_DELAY = 0.15; // 150ms buffering for smoothness
 
     // Initialize Audio Context
     useEffect(() => {
         const AudioContext = window.AudioContext || window.webkitAudioContext;
-        audioContextRef.current = new AudioContext();
+        audioContextRef.current = new AudioContext({
+            // Explicitly requesting low latency if supported
+            latencyHint: 'interactive',
+        });
 
         return () => {
             if (audioContextRef.current) {
@@ -24,50 +27,15 @@ export function useAudio(socket) {
         };
     }, []);
 
-    // Helper: Convert Float32 (audio engine) to Int16 (transport)
-    const floatTo16BitPCM = (input) => {
-        const output = new Int16Array(input.length);
-        for (let i = 0; i < input.length; i++) {
-            const s = Math.max(-1, Math.min(1, input[i]));
-            output[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-        }
-        return output;
-    };
-
     // Helper: Convert Int16 (transport) to Float32 (audio engine)
     const pcmToFloat32 = (input) => {
         const output = new Float32Array(input.length);
         for (let i = 0; i < input.length; i++) {
             const int = input[i];
-            // If the high bit is on, it's negative in 16-bit 2's complement
             output[i] = (int >= 32768 ? int - 65536 : int) / 32768;
         }
         return output;
     };
-
-    // Helper: Downsample to target rate
-    const downsampleBuffer = (buffer, inputRate, outputRate) => {
-        if (outputRate === inputRate) return buffer;
-        const sampleRateRatio = inputRate / outputRate;
-        const newLength = Math.round(buffer.length / sampleRateRatio);
-        const result = new Float32Array(newLength);
-        let offsetResult = 0;
-        let offsetBuffer = 0;
-        while (offsetResult < result.length) {
-            const nextOffsetBuffer = Math.round((offsetResult + 1) * sampleRateRatio);
-            // Simple accumulation for downsampling (prevents aliasing somewhat better than skipping)
-            let accum = 0, count = 0;
-            for (let i = offsetBuffer; i < nextOffsetBuffer && i < buffer.length; i++) {
-                accum += buffer[i];
-                count++;
-            }
-            result[offsetResult] = count > 0 ? accum / count : 0;
-            offsetResult++;
-            offsetBuffer = nextOffsetBuffer;
-        }
-        return result;
-    }
-
 
     // Handle incoming voice data
     useEffect(() => {
@@ -76,30 +44,29 @@ export function useAudio(socket) {
         const handleVoice = async (data) => {
             try {
                 if (!audioContextRef.current) return;
-                if (audioContextRef.current.state === 'suspended') {
-                    await audioContextRef.current.resume();
+                const context = audioContextRef.current;
+
+                if (context.state === 'suspended') {
+                    await context.resume();
                 }
 
-                // data.audio is expected to be an ArrayBuffer containing Int16 PCM
+                // data.audio is Int16 PCM
                 const int16Data = new Int16Array(data.audio);
                 const float32Data = pcmToFloat32(int16Data);
 
-                const buffer = audioContextRef.current.createBuffer(1, float32Data.length, TARGET_SAMPLE_RATE);
+                const buffer = context.createBuffer(1, float32Data.length, TARGET_SAMPLE_RATE);
                 buffer.getChannelData(0).set(float32Data);
 
-                const source = audioContextRef.current.createBufferSource();
+                const source = context.createBufferSource();
                 source.buffer = buffer;
-                source.connect(audioContextRef.current.destination);
+                source.connect(context.destination);
 
-                const currentTime = audioContextRef.current.currentTime;
+                const currentTime = context.currentTime;
+
+                // Jitter Buffer Logic
+                // If we are starting from silence or fell behind, reset start time to 'now + buffer'
                 if (nextStartTimeRef.current < currentTime) {
-                    nextStartTimeRef.current = currentTime;
-                }
-
-                // Add a tiny safety offset if we fell behind significantly
-                // to avoid glitches at the cost of slight latency
-                if (nextStartTimeRef.current < currentTime + 0.05) {
-                    nextStartTimeRef.current = currentTime + 0.05;
+                    nextStartTimeRef.current = currentTime + JITTER_BUFFER_DELAY;
                 }
 
                 source.start(nextStartTimeRef.current);
@@ -116,38 +83,50 @@ export function useAudio(socket) {
 
     const startRecording = useCallback(async () => {
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            streamRef.current = stream;
-
             const context = audioContextRef.current;
             if (context.state === 'suspended') {
                 await context.resume();
             }
+
+            // Load the worklet module if not already loaded
+            try {
+                // Ensure we only add it once
+                await context.audioWorklet.addModule('/audio-processor.js');
+            } catch (e) {
+                // Ignore error if already added or similar
+                // console.log("Module might be already added", e);
+            }
+
+            const stream = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true,
+                    // Request native sample rate to avoid internal resampling overhead if possible,
+                    // though browser usually handles this.
+                }
+            });
+            streamRef.current = stream;
+
             const source = context.createMediaStreamSource(stream);
             sourceRef.current = source;
 
-            // Use ScriptProcessorNode (deprecated but widely supported and simple for this)
-            // or AudioWorklet (better but more complex setup with external files).
-            // We use ScriptProcessor for immediate single-file solution.
-            const processor = context.createScriptProcessor(BUFFER_SIZE, 1, 1);
-            processorRef.current = processor;
+            // Create AudioWorkletNode
+            const workletNode = new AudioWorkletNode(context, 'audio-processor');
+            workletNodeRef.current = workletNode;
 
-            source.connect(processor);
-            processor.connect(context.destination); // Needed for the processor to run in many browsers
-
-            processor.onaudioprocess = (e) => {
+            workletNode.port.onmessage = (event) => {
                 if (!socket) return;
-                const inputData = e.inputBuffer.getChannelData(0);
-
-                // Downsample if needed (e.g. 48k -> 16k)
-                const downsampled = downsampleBuffer(inputData, context.sampleRate, TARGET_SAMPLE_RATE);
-
-                // Convert to Int16
-                const pcm16 = floatTo16BitPCM(downsampled);
-
-                // emit
-                socket.emit('voice', { audio: pcm16.buffer });
+                // event.data.audio is an ArrayBuffer (Int16)
+                socket.emit('voice', { audio: event.data.audio });
             };
+
+            workletNode.onprocessorerror = (err) => {
+                console.error('AudioWorklet processor error:', err);
+            };
+
+            source.connect(workletNode);
+            workletNode.connect(context.destination); // Connect to destination to keep it alive, even if it outputs nothing
 
             setIsRecording(true);
 
@@ -157,10 +136,10 @@ export function useAudio(socket) {
     }, [socket]);
 
     const stopRecording = useCallback(() => {
-        if (processorRef.current) {
-            processorRef.current.disconnect();
-            processorRef.current.onaudioprocess = null;
-            processorRef.current = null;
+        if (workletNodeRef.current) {
+            workletNodeRef.current.disconnect();
+            workletNodeRef.current.port.onmessage = null;
+            workletNodeRef.current = null;
         }
         if (sourceRef.current) {
             sourceRef.current.disconnect();
