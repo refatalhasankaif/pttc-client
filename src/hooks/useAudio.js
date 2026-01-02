@@ -50,8 +50,13 @@ export function useAudio(socket) {
                     await context.resume();
                 }
 
-                // data.audio is Int16 PCM
-                const int16Data = new Int16Array(data.audio);
+                // data.audio is Int16 PCM. Handle potential alignment issues (odd byte length).
+                let rawBuffer = data.audio;
+                if (rawBuffer.byteLength % 2 !== 0) {
+                    console.warn(`[Audio] Received odd byte length: ${rawBuffer.byteLength}. Trimming 1 byte.`);
+                    rawBuffer = rawBuffer.slice(0, rawBuffer.byteLength - 1);
+                }
+                const int16Data = new Int16Array(rawBuffer);
                 const float32Data = pcmToFloat32(int16Data);
 
                 const buffer = context.createBuffer(1, float32Data.length, TARGET_SAMPLE_RATE);
@@ -90,11 +95,10 @@ export function useAudio(socket) {
 
             // Load the worklet module if not already loaded
             try {
-                // Ensure we only add it once
                 await context.audioWorklet.addModule('/audio-processor.js');
+                console.log('AudioWorklet module loaded successfully');
             } catch (e) {
-                // Ignore error if already added or similar
-                // console.log("Module might be already added", e);
+                console.error("Failed to load AudioWorklet module:", e);
             }
 
             const stream = await navigator.mediaDevices.getUserMedia({
@@ -117,6 +121,7 @@ export function useAudio(socket) {
 
             workletNode.port.onmessage = (event) => {
                 if (!socket) return;
+                // console.log('[useAudio] Received data from worklet, emitting to socket'); // Spammy
                 // event.data.audio is an ArrayBuffer (Int16)
                 socket.emit('voice', { audio: event.data.audio });
             };

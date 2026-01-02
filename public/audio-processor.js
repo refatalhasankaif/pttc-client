@@ -7,11 +7,13 @@ class AudioProcessor extends AudioWorkletProcessor {
 
         // Downsampling state
         this.targetSampleRate = 16000;
+        console.log('[AudioWorklet] Initialized');
     }
 
     process(inputs, outputs, parameters) {
         const input = inputs[0];
         if (input.length > 0) {
+            // console.log('[AudioWorklet] Processing data'); // Uncomment for spammy debug
             const inputChannel = input[0]; // Mono is fine for voice
 
             // We need to accumulate samples.
