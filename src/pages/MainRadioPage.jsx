@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../hooks/useSocket';
@@ -27,23 +27,24 @@ export default function MainRadioPage() {
   useAuth();
   const navigate = useNavigate();
   const { socket, connected } = useSocket();
-  
   const [profile, setProfile] = useState(null);
   const [onlineUsers, setOnlineUsers] = useState([]);
   const [systemMessages, setSystemMessages] = useState([]);
   const [speakingUsers, setSpeakingUsers] = useState(new Set());
   const [isTalking, setIsTalking] = useState(false);
   const [pttDenied, setPttDenied] = useState(null);
+  const [permissionsGranted, setPermissionsGranted] = useState(false);
+  const [permissionError, setPermissionError] = useState(null);
   const keysPressed = useRef({});
   const pttButtonPressed = useRef(false);
 
-  const addSystemMessage = (text, type = 'info') => {
+  const addSystemMessage = useCallback((text, type = 'info') => {
     const id = Date.now();
     setSystemMessages(prev => [...prev, { id, text, type, timestamp: new Date() }]);
     setTimeout(() => {
       setSystemMessages(prev => prev.filter(msg => msg.id !== id));
     }, 6000);
-  };
+  }, []);
 
   const handleLogout = async () => {
     try {
@@ -53,21 +54,20 @@ export default function MainRadioPage() {
     }
   };
 
-  const startTalking = () => {
-    if (!isTalking && socket && connected) {
+  const startTalking = useCallback(() => {
+    if (!isTalking && socket && connected && permissionsGranted) {
       setIsTalking(true);
       socket.emit('request-talk');
     }
-  };
+  }, [isTalking, socket, connected, permissionsGranted]);
 
-  const stopTalking = () => {
+  const stopTalking = useCallback(() => {
     if (isTalking && socket && connected) {
       setIsTalking(false);
       socket.emit('release-talk');
     }
-  };
+  }, [isTalking, socket, connected]);
 
-  // Handle PTT Button
   const handlePTTMouseDown = () => {
     pttButtonPressed.current = true;
     startTalking();
@@ -78,7 +78,6 @@ export default function MainRadioPage() {
     stopTalking();
   };
 
-  // Handle touch events for mobile
   const handlePTTTouchStart = (e) => {
     e.preventDefault();
     pttButtonPressed.current = true;
@@ -91,6 +90,27 @@ export default function MainRadioPage() {
     stopTalking();
   };
 
+  // Request microphone and speaker permissions
+  const requestPermissions = async () => {
+    try {
+      // Request microphone access
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: true 
+      });
+      
+      // Stop the stream immediately as we just need permission
+      stream.getTracks().forEach(track => track.stop());
+      
+      setPermissionsGranted(true);
+      addSystemMessage('AUDIO PERMISSIONS GRANTED', 'info');
+    } catch (error) {
+      console.error('Permission error:', error);
+      setPermissionError(error.name === 'NotAllowedError' 
+        ? 'MICROPHONE ACCESS DENIED' 
+        : 'MICROPHONE ACCESS ERROR');
+    }
+  };
+
   useEffect(() => {
     const fetchProfile = async () => {
       try {
@@ -101,7 +121,6 @@ export default function MainRadioPage() {
         navigate('/profile-setup');
       }
     };
-
     fetchProfile();
   }, [navigate]);
 
@@ -164,9 +183,8 @@ export default function MainRadioPage() {
       socket.off('ptt-already');
       socket.off('error');
     };
-  }, [socket]);
+  }, [socket, addSystemMessage]);
 
-  // Handle Shift key for PTT
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (e.key === 'Shift' && !keysPressed.current.shift) {
@@ -189,11 +207,11 @@ export default function MainRadioPage() {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [isTalking, socket, connected]);
+  }, [startTalking, stopTalking]);
 
   if (!profile) {
     return (
-      <div className="flex items-center justify-center h-screen bg-gradient-to-br from-military-900 to-military-800">
+      <div className="flex items-center justify-center h-screen bg-linear-to-br from-military-900 to-military-800">
         <div className="text-military-accent font-mono uppercase tracking-widest">
           ▰▰▰ INITIALIZING ▰▰▰
         </div>
@@ -201,11 +219,73 @@ export default function MainRadioPage() {
     );
   }
 
+  // Permission request modal
+  if (!permissionsGranted && !permissionError) {
+    return (
+      <div className="h-screen bg-linear-to-br from-military-900 to-military-800 flex items-center justify-center p-4">
+        <div className="bg-military-800 border-4 border-military-accent p-8 max-w-md w-full text-center space-y-6"
+          style={{ boxShadow: '0 0 40px rgba(46, 204, 113, 0.4)' }}>
+          <div className="flex justify-center mb-4">
+            <Mic2 className="w-20 h-20 text-military-accent" />
+          </div>
+          <h2 className="text-military-accent text-2xl font-black uppercase tracking-wider">
+            AUDIO ACCESS REQUIRED
+          </h2>
+          <p className="text-military-400 font-mono text-sm uppercase tracking-widest">
+            THIS SYSTEM REQUIRES MICROPHONE ACCESS FOR VOICE TRANSMISSION
+          </p>
+          <button
+            onClick={requestPermissions}
+            className="w-full bg-military-accent hover:bg-green-500 text-military-900 font-black uppercase tracking-wider py-4 px-6 transition-all duration-200"
+            style={{ boxShadow: '0 0 20px rgba(46, 204, 113, 0.3)' }}
+          >
+            ▰ GRANT ACCESS ▰
+          </button>
+          <p className="text-military-500 text-xs font-mono">
+            Your audio will only be transmitted when you press the PTT button
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // Permission error screen
+  if (permissionError) {
+    return (
+      <div className="h-screen bg-linear-to-br from-military-900 to-military-800 flex items-center justify-center p-4">
+        <div className="bg-military-800 border-4 border-military-danger p-8 max-w-md w-full text-center space-y-6"
+          style={{ boxShadow: '0 0 40px rgba(231, 76, 60, 0.4)' }}>
+          <h2 className="text-military-danger text-2xl font-black uppercase tracking-wider">
+            ⚠ ACCESS DENIED ⚠
+          </h2>
+          <p className="text-military-400 font-mono text-sm uppercase tracking-widest">
+            {permissionError}
+          </p>
+          <p className="text-military-500 text-xs font-mono">
+            Please enable microphone access in your browser settings and reload the page
+          </p>
+          <button
+            onClick={() => window.location.reload()}
+            className="w-full bg-military-accent hover:bg-green-500 text-military-900 font-black uppercase tracking-wider py-4 px-6 transition-all duration-200"
+          >
+            ▰ RELOAD PAGE ▰
+          </button>
+          <button
+            onClick={handleLogout}
+            className="w-full bg-military-danger hover:bg-red-600 text-white font-black uppercase tracking-wider py-3 px-6 transition-all duration-200"
+          >
+            EXIT
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="h-screen bg-gradient-to-br from-military-900 via-military-800 to-military-700 flex flex-col overflow-hidden">
+    <div className="h-screen bg-linear-to-br from-military-900 via-military-800 to-military-700 flex flex-col overflow-hidden">
       {/* Header */}
       <div className="bg-military-900 border-b-2 lg:border-b-4 border-military-accent px-3 sm:px-4 lg:px-6 py-2 sm:py-3 lg:py-4 flex items-center justify-between"
-           style={{ boxShadow: '0 4px 15px rgba(46, 204, 113, 0.2)' }}>
+        style={{ boxShadow: '0 4px 15px rgba(46, 204, 113, 0.2)' }}>
         <div className="flex items-center gap-2 sm:gap-3 lg:gap-4">
           <div className={`w-3 h-3 sm:w-4 sm:h-4 rounded-full ${connected ? 'bg-military-accent' : 'bg-military-danger'} animate-pulse`} />
           <h1 className="text-sm sm:text-lg lg:text-2xl font-black text-military-accent uppercase tracking-wider flex items-center gap-1 sm:gap-2">
@@ -217,7 +297,7 @@ export default function MainRadioPage() {
         </div>
         <div className="flex items-center gap-2 sm:gap-3 lg:gap-4">
           <div className="hidden sm:flex items-center gap-2 lg:gap-3 bg-military-800 border border-military-accent lg:border-2 px-2 py-1 sm:px-3 sm:py-2 lg:px-4"
-               style={{ boxShadow: '0 0 10px rgba(46, 204, 113, 0.3)' }}>
+            style={{ boxShadow: '0 0 10px rgba(46, 204, 113, 0.3)' }}>
             <img
               src={`/avatars/${profile.avatarId}.png`}
               alt="Your avatar"
@@ -247,7 +327,7 @@ export default function MainRadioPage() {
         <div className="w-full lg:w-96 flex flex-col gap-3 sm:gap-4 lg:gap-6 lg:max-h-full">
           {/* Online Users */}
           <div className="bg-military-800 border border-military-accent lg:border-2 p-3 sm:p-4 flex flex-col"
-               style={{ boxShadow: '0 0 20px rgba(46, 204, 113, 0.1)' }}>
+            style={{ boxShadow: '0 0 20px rgba(46, 204, 113, 0.1)' }}>
             <div className="flex items-center gap-2 mb-3 sm:mb-4">
               <Users className="w-4 h-4 sm:w-5 sm:h-5 text-military-accent" />
               <h2 className="text-military-accent font-black uppercase tracking-widest text-xs sm:text-sm">ONLINE [{onlineUsers.length}]</h2>
@@ -257,11 +337,14 @@ export default function MainRadioPage() {
                 <p className="text-military-400 font-mono text-xs sm:text-sm">-- AWAITING CONNECTIONS --</p>
               ) : (
                 onlineUsers.map((u) => (
-                  <div key={u.uid} className={`border-l-2 lg:border-l-4 p-2 sm:p-3 transition-all ${
-                    speakingUsers.has(u.callsign)
-                      ? 'bg-military-700 border-military-accent shadow-lg'
-                      : 'bg-military-700 border-military-600'
-                  }`}>
+                  <div
+                    key={u.uid}
+                    className={`border-l-2 lg:border-l-4 p-2 sm:p-3 transition-all ${
+                      speakingUsers.has(u.callsign)
+                        ? 'bg-military-700 border-military-accent shadow-lg'
+                        : 'bg-military-700 border-military-600'
+                    }`}
+                  >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2 flex-1 min-w-0">
                         <img
@@ -290,8 +373,8 @@ export default function MainRadioPage() {
           </div>
 
           {/* Activity Log */}
-          <div className="bg-military-800 border border-military-accent lg:border-2 p-3 sm:p-4 flex flex-col flex-1 min-h-[150px] lg:min-h-0"
-               style={{ boxShadow: '0 0 20px rgba(46, 204, 113, 0.1)' }}>
+          <div className="bg-military-800 border border-military-accent lg:border-2 p-3 sm:p-4 flex flex-col flex-1 min-h-37.5 lg:min-h-0"
+            style={{ boxShadow: '0 0 20px rgba(46, 204, 113, 0.1)' }}>
             <div className="flex items-center gap-2 mb-3 sm:mb-4">
               <MessageCircle className="w-4 h-4 sm:w-5 sm:h-5 text-military-accent" />
               <h2 className="text-military-accent font-black uppercase tracking-widest text-xs sm:text-sm">NET LOG</h2>
@@ -322,8 +405,7 @@ export default function MainRadioPage() {
         {/* Center: PTT Control */}
         <div className="flex-1 flex flex-col items-center justify-center py-4 sm:py-6 lg:py-0">
           <div className="bg-military-800 border-2 lg:border-4 border-military-accent p-6 sm:p-8 lg:p-12 text-center max-w-md w-full space-y-4 sm:space-y-6 lg:space-y-8"
-               style={{ boxShadow: '0 0 40px rgba(46, 204, 113, 0.4)' }}>
-            
+            style={{ boxShadow: '0 0 40px rgba(46, 204, 113, 0.4)' }}>
             <div>
               <h3 className="text-military-accent text-lg sm:text-xl lg:text-2xl font-black uppercase tracking-wider mb-2 sm:mb-3 lg:mb-4">PUSH-TO-TALK</h3>
               <p className="text-military-accent text-xs sm:text-sm font-mono tracking-widest">
@@ -361,12 +443,12 @@ export default function MainRadioPage() {
                 {isTalking ? '▰ TRANSMITTING ▰' : '◇ READY ◇'}
               </p>
               <p className="text-military-400 text-xs font-mono uppercase tracking-widest mt-2">
-                {isTalking ? 'RELEASE TO STOP' : 
+                {isTalking ? 'RELEASE TO STOP' : (
                   <span>
                     <span className="hidden sm:inline">PRESS & HOLD SHIFT OR BUTTON</span>
                     <span className="sm:hidden">PRESS & HOLD BUTTON</span>
                   </span>
-                }
+                )}
               </p>
             </div>
 
@@ -391,7 +473,7 @@ export default function MainRadioPage() {
 
       {/* Footer */}
       <div className="bg-military-900 border-t-2 lg:border-t-4 border-military-accent px-3 sm:px-4 lg:px-6 py-2 sm:py-3 text-center text-military-accent text-xs font-mono uppercase tracking-widest"
-           style={{ boxShadow: '0 -4px 15px rgba(46, 204, 113, 0.2)' }}>
+        style={{ boxShadow: '0 -4px 15px rgba(46, 204, 113, 0.2)' }}>
         <span className="hidden sm:inline">▰▰▰ SINGLE CHANNEL • MAX 2 SPEAKERS • ENCRYPTED TRANSMISSION ▰▰▰</span>
         <span className="sm:hidden">▰ ENCRYPTED ▰</span>
       </div>

@@ -78,7 +78,7 @@ export default function ProfileSetupPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-military-900 via-military-800 to-military-700 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-linear-to-br from-military-900 via-military-800 to-military-700 flex items-center justify-center p-4">
       {/* Corner decorations */}
       <div className="absolute top-4 left-4 w-4 h-4 border-t-4 border-l-4 border-military-accent"></div>
       <div className="absolute top-4 right-4 w-4 h-4 border-t-4 border-r-4 border-military-accent"></div>
@@ -216,7 +216,7 @@ export default function ProfileSetupPage() {
             {/* Error Message */}
             {error && (
               <div className="bg-military-danger bg-opacity-30 border-2 border-military-danger px-4 py-3 rounded-lg flex items-start gap-3">
-                <AlertCircle className="w-5 h-5 text-military-danger flex-shrink-0 mt-0.5" />
+                <AlertCircle className="w-5 h-5 text-military-danger shrink-0 mt-0.5" />
                 <p className="text-military-danger font-mono text-sm">{error}</p>
               </div>
             )}
